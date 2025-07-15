@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/syxxzzr/go-mpls/go-mpls"
+	"github.com/syxxzzr/go-mpls"
 )
 
 func main() {
