@@ -122,16 +122,6 @@ func parseStreamAttributes(rawData []byte) *StreamAttributes {
 	}
 }
 
-//func parseStream(rawData []byte) *Stream {
-//	streamEntry := parseStreamEntry(rawData[0:])
-//	streamAttributes := parseStreamAttributes(rawData[streamEntry.Length+1:])
-//
-//	return &Stream{
-//		StreamEntry:      streamEntry,
-//		StreamAttributes: streamAttributes,
-//	}
-//}
-
 func parseStreamsList(rawData []byte, number int) ([]*Stream, int) {
 	if number == 0 {
 		return nil, 0
