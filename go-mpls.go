@@ -122,16 +122,6 @@ func parseStreamAttributes(rawData []byte) *StreamAttributes {
 	}
 }
 
-//func parseStream(rawData []byte) *Stream {
-//	streamEntry := parseStreamEntry(rawData[0:])
-//	streamAttributes := parseStreamAttributes(rawData[streamEntry.Length+1:])
-//
-//	return &Stream{
-//		StreamEntry:      streamEntry,
-//		StreamAttributes: streamAttributes,
-//	}
-//}
-
 func parseStreamsList(rawData []byte, number int) ([]*Stream, int) {
 	if number == 0 {
 		return nil, 0
@@ -327,7 +317,7 @@ func parseSubPath(rawData []byte) *SubPath {
 	}
 }
 
-func parseAppInfoPlayList(rawData []byte) *AppInfoPlayList {
+func parseAppInfoPlayList(rawData []byte, channel chan *AppInfoPlayList) {
 	length := int(binary.BigEndian.Uint32(rawData[:4]))
 	playbackType := PlaybackType(rawData[5])
 
@@ -339,7 +329,7 @@ func parseAppInfoPlayList(rawData []byte) *AppInfoPlayList {
 	}
 	userOperationMaskTable := parseUOMaskTable(rawData[8:])
 
-	return &AppInfoPlayList{
+	channel <- &AppInfoPlayList{
 		Length:                        length,
 		PlaybackType:                  playbackType,
 		PlaybackCount:                 playbackCount,
@@ -352,7 +342,7 @@ func parseAppInfoPlayList(rawData []byte) *AppInfoPlayList {
 	}
 }
 
-func parsePlayList(rawData []byte) *PlayList {
+func parsePlayList(rawData []byte, channel chan *PlayList) {
 	length := int(binary.BigEndian.Uint32(rawData[:4]))
 	numberOfPlayItems := int(binary.BigEndian.Uint16(rawData[6:8]))
 	numberOfSubPaths := int(binary.BigEndian.Uint16(rawData[8:10]))
@@ -373,7 +363,7 @@ func parsePlayList(rawData []byte) *PlayList {
 		subPathStart += subPath.Length
 	}
 
-	return &PlayList{
+	channel <- &PlayList{
 		Length:            length,
 		NumberOfPlayItems: numberOfPlayItems,
 		NumberOfSubPaths:  numberOfSubPaths,
@@ -382,7 +372,7 @@ func parsePlayList(rawData []byte) *PlayList {
 	}
 }
 
-func parsePlayListMark(rawData []byte) *PlayListMark {
+func parsePlayListMark(rawData []byte, channel chan *PlayListMark) {
 	length := int(binary.BigEndian.Uint32(rawData[:4]))
 	numberOfPlayListMarks := int(binary.BigEndian.Uint16(rawData[4:6]))
 
@@ -397,17 +387,17 @@ func parsePlayListMark(rawData []byte) *PlayListMark {
 		})
 	}
 
-	return &PlayListMark{
+	channel <- &PlayListMark{
 		Length:                length,
 		NumberOfPlayListMarks: numberOfPlayListMarks,
 		PlayListMarksList:     playListMarksList,
 	}
 }
 
-func parseExtensionData(rawData []byte) *ExtensionData {
+func parseExtensionData(rawData []byte, channel chan *ExtensionData) {
 	length := int(binary.BigEndian.Uint32(rawData[:4]))
 	if length == 0 {
-		return nil
+		channel <- nil
 	}
 	dataBlockStartAddress := int(binary.BigEndian.Uint32(rawData[4:8]))
 
@@ -430,7 +420,7 @@ func parseExtensionData(rawData []byte) *ExtensionData {
 		extDataEntryItemsList = append(extDataEntryItemsList, &extDataEntryItem)
 	}
 
-	return &ExtensionData{
+	channel <- &ExtensionData{
 		Length:                 length,
 		DataBlockStartAddress:  dataBlockStartAddress,
 		NumberOfExtDataEntries: numberOfExtDataEntries,
@@ -457,13 +447,21 @@ func Parse(path string) (*MPLS, error) {
 	playlistStartAddress := int(binary.BigEndian.Uint32(rawData[0x08:0x0c]))
 	playlistMarkStartAddress := int(binary.BigEndian.Uint32(rawData[0x0c:0x10]))
 	extensionDataStartAddress := int(binary.BigEndian.Uint32(rawData[0x10:0x14]))
-	applicationInfoPlayList := parseAppInfoPlayList(rawData[0x28:0x39])
-	playList := parsePlayList(rawData[playlistStartAddress:])
-	playListMark := parsePlayListMark(rawData[playlistMarkStartAddress:])
 
-	var extensionData *ExtensionData
+	applicationInfoPlayList := make(chan *AppInfoPlayList)
+	go parseAppInfoPlayList(rawData[0x28:0x39], applicationInfoPlayList)
+
+	playList := make(chan *PlayList)
+	go parsePlayList(rawData[playlistStartAddress:], playList)
+
+	playListMark := make(chan *PlayListMark)
+	go parsePlayListMark(rawData[playlistMarkStartAddress:], playListMark)
+
+	extensionData := make(chan *ExtensionData, 1)
 	if extensionDataStartAddress != 0 {
-		extensionData = parseExtensionData(rawData[extensionDataStartAddress:])
+		go parseExtensionData(rawData[extensionDataStartAddress:], extensionData)
+	} else {
+		extensionData <- nil
 	}
 
 	return &MPLS{
@@ -473,9 +471,9 @@ func Parse(path string) (*MPLS, error) {
 		PlaylistStartAddress:      playlistStartAddress,
 		PlaylistMarkStartAddress:  playlistMarkStartAddress,
 		ExtensionDataStartAddress: extensionDataStartAddress,
-		ApplicationInfoPlaylist:   applicationInfoPlayList,
-		PlayList:                  playList,
-		PlayListMark:              playListMark,
-		ExtensionData:             extensionData,
+		ApplicationInfoPlaylist:   <-applicationInfoPlayList,
+		PlayList:                  <-playList,
+		PlayListMark:              <-playListMark,
+		ExtensionData:             <-extensionData,
 	}, nil
 }
